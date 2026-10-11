@@ -41,7 +41,7 @@ writeFileSync(path.join(stage, 'package.json'), JSON.stringify({
     directories: { output: 'release' }, files: ['helper/**/*', 'server/**/*', 'package.json'],
     extraResources: [{ from: 'bin', to: 'bin' }],
     mac: { category: 'public.app-category.medical', electronLanguages: ['de', 'en'], target: process.argv.includes('--dmg') ? ['dmg'] : ['dir'], ...(!signed && { identity: null }), extendInfo: { LSUIElement: true } },
-    win: { target: 'nsis' }, nsis: { oneClick: true, perMachine: false, deleteAppDataOnUninstall: true, include: 'helper/installer.nsh' },
+    win: { target: 'nsis' }, nsis: { artifactName: 'Chetti-Helfer-Setup.exe', oneClick: true, perMachine: false, deleteAppDataOnUninstall: true, include: 'helper/installer.nsh' },
   },
 }, null, 2));
 run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: stage });

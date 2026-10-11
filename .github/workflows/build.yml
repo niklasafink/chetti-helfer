@@ -51,12 +51,25 @@ jobs:
           Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait
           Start-Sleep -Seconds 5
           if (Test-Path $exe.FullName) { throw 'Programm nach der Deinstallation noch vorhanden.' }
-      - uses: actions/upload-artifact@v4
+      - id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: Chetti-Helfer-win
           path: build/helper-app/release/*.exe
           if-no-files-found: error
+      # Signatur über SignPath: läuft, sobald die Organisation eingetragen ist (Variable SIGNPATH_ORGANIZATION_ID, Secret SIGNPATH_API_TOKEN).
+      - name: Signieren (SignPath)
+        if: vars.SIGNPATH_ORGANIZATION_ID != '' && startsWith(github.ref, 'refs/tags/')
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'chetti-helfer' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/helper-app/release/*.exe
+          files: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && 'signed/*.exe' || 'build/helper-app/release/*.exe' }}

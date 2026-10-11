@@ -14,10 +14,9 @@ const run = promisify(execFile);
 const exists = file => access(file).then(() => true, () => false);
 
 /** Ordner der Wissensbasis. Je Programmversion wird einmal geladen; scheitert das Laden, gilt der vorhandene Stand weiter. */
-export async function ensureKnowledge(directory, { version, url = process.env.CHETTI_KNOWLEDGE_URL, fetcher = fetch } = {}) {
+export async function ensureKnowledge(directory, { version, url = process.env.CHETTI_KNOWLEDGE_URL, fetcher = fetch, local = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'knowledge') } = {}) {
   if (process.env.CHETTI_KNOWLEDGE) return process.env.CHETTI_KNOWLEDGE;
   // Entwicklung im Projekt: der Ordner liegt neben dem Helfer.
-  const local = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'knowledge');
   if (await exists(path.join(local, 'stil'))) return local;
   const target = path.join(directory, 'wissen'), marker = path.join(target, 'version.txt');
   const have = await readFile(marker, 'utf8').catch(() => null);
