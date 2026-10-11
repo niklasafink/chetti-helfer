@@ -13,7 +13,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { DEFAULT_ORIGINS, DEFAULT_PORT, createHelper } from './server.mjs';
+import { ensureKnowledge } from './wissen.mjs';
 import { ensureCertificate } from './tls.mjs';
 import { installTrust, removeTrust } from './trust.mjs';
 import { setAutostart } from './autostart.mjs';
@@ -28,7 +28,7 @@ const defaultDir = () => process.platform === 'darwin' ? path.join(os.homedir(),
   : process.platform === 'win32' ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Chetti Helfer')
     : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'chetti-helfer');
 const directory = path.resolve(value('dir') || process.env.CHETTI_HELPER_DIR || defaultDir());
-const version = createRequire(import.meta.url)('../package.json').version;
+const { version, wissen } = createRequire(import.meta.url)('../package.json');
 
 if (flag('install-trust') || flag('remove-trust')) {
   const certificate = await ensureCertificate(directory);
@@ -44,6 +44,8 @@ if (flag('autostart')) {
   process.exit(0);
 }
 
+await ensureKnowledge(directory, { version, url: process.env.CHETTI_KNOWLEDGE_URL || wissen });
+const { DEFAULT_ORIGINS, DEFAULT_PORT, createHelper } = await import('./server.mjs');
 const tls = flag('http') ? undefined : await ensureCertificate(directory);
 const helper = await createHelper({
   directory, port: Number(value('port') || process.env.CHETTI_HELPER_PORT || DEFAULT_PORT), tls, version,

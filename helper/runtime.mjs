@@ -11,7 +11,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { CATALOG, ensureOllama, findOllama, stopOllama } from '../server/modelle.mjs';
+import { CATALOG, downloading, ensureOllama, findOllama, ownsOllama, stopOllama } from '../server/modelle.mjs';
 
 const KINDS = ['stt', 'llm'];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -105,7 +105,10 @@ export function whisperService({ config, home = os.homedir(), fetcher = fetch, b
       if (!exe) throw missing('Das Spracherkennungsprogramm (whisper-server) fehlt.');
       const child = spawn(exe, ['-m', model, '--host', '127.0.0.1', '--port', url.port, '--inference-path', `${url.pathname.replace(/\/$/, '')}/audio/transcriptions`, '-l', 'auto', '-bs', '5'], { stdio: 'ignore', windowsHide: true });
       let dead = false;
-      child.on('exit', () => { dead = true; onExit?.(); });
+      // Endet der Helfer, ohne die Dienste zu schließen, soll die Spracherkennung nicht verwaist weiterlaufen.
+      const bye = () => child.kill();
+      process.once('exit', bye);
+      child.on('exit', () => { dead = true; process.off('exit', bye); onExit?.(); });
       child.on('error', () => { dead = true; onExit?.(); });
       for (let i = 0; i < 180 && !dead; i++) {
         if (await up(`${url.origin}/health`, fetcher)) return async () => { child.kill(); };
@@ -120,13 +123,16 @@ export function whisperService({ config, home = os.homedir(), fetcher = fetch, b
 /** Ollama: wird gestartet, wenn es vorhanden ist; die Installation übernimmt der Modell-Download (server/modelle.mjs). */
 export function ollamaService({ config, home = os.homedir(), fetcher = fetch } = {}) {
   const base = new URL(config.llmUrl).origin;
+  // Läuft gerade ein Modell-Download, bleibt Ollama dafür an; der nächste Leerlauf beendet es.
+  const stop = async () => { if (!downloading()) stopOllama(); };
   return {
     async start() {
-      // Ollama oder ein anderer OpenAI-kompatibler Dienst (z. B. llama-server) läuft schon: mitbenutzen, nie beenden.
-      if (await up(`${base}/api/version`, fetcher) || await up(`${config.llmUrl}/models`, fetcher)) return null;
+      // Ollama oder ein anderer OpenAI-kompatibler Dienst (z. B. llama-server) läuft schon: mitbenutzen. Beendet wird er nur,
+      // wenn Chetti ihn selbst gestartet hat (etwa für einen Modell-Download), nie ein Dienst des Nutzers.
+      if (await up(`${base}/api/version`, fetcher) || await up(`${config.llmUrl}/models`, fetcher)) return ownsOllama() ? stop : null;
       if (!(await findOllama({ home }))) throw missing('Das Programm für das Sprachmodell (Ollama) fehlt.');
       await ensureOllama({ step: 'dienst', done: 0, total: 0, from: null, controller: new AbortController() }, { fetcher, home });
-      return async () => { stopOllama(); };
+      return stop;
     },
     /** Lädt das Sprachmodell in den Speicher, bevor die erste Anfrage kommt. */
     async warm() {

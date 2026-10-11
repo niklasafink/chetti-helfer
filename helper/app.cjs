@@ -18,11 +18,23 @@ if (process.platform === 'darwin') app.dock?.hide();
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('window-all-closed', event => event.preventDefault());
+  // Beim Beenden (Menü, Abmelden, Signal) enden auch Spracherkennung und Sprachmodell; sonst belegen sie weiter Speicher,
+  // und der nächste Start hält sie für fremde Dienste und beendet sie nie.
+  let closing = false, closed = false;
+  app.on('before-quit', event => {
+    if (closed || !helper) return;
+    event.preventDefault();
+    if (closing) return;
+    closing = true;
+    void helper.close().catch(() => {}).finally(() => { closed = true; app.quit(); });
+  });
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => app.quit());
   const data = app.getPath('userData');
   // Fehler beim Start landen in der Logdatei des Helfers (für die Fehlersuche in der Praxis), nicht im Nichts.
   const log = error => fs.mkdir(data, { recursive: true }).then(() => fs.appendFile(path.join(data, 'helfer.log'), `${new Date().toISOString()} ${error?.stack || error}\n`)).catch(() => {});
   app.whenReady().then(async () => {
     if (app.isPackaged) process.env.CHETTI_BIN_DIR ||= path.join(process.resourcesPath, 'bin');
+    await (await import(here('wissen.mjs'))).ensureKnowledge(data, { version: app.getVersion(), url: process.env.CHETTI_KNOWLEDGE_URL || require('../package.json').wissen });
     const { createHelper, DEFAULT_ORIGINS } = await import(here('server.mjs'));
     const { ensureCertificate } = await import(here('tls.mjs'));
     const { installTrust } = await import(here('trust.mjs'));
@@ -34,7 +46,7 @@ else {
       try { await installTrust(certificate.certFile); await fs.writeFile(marker, fingerprint); } catch { /* Nutzer hat abgelehnt: beim nächsten Start erneut */ }
     }
     if (!TEST && app.isPackaged && !(await fs.stat(path.join(data, 'autostart.txt')).catch(() => null))) {
-      app.setLoginItemSettings({ openAtLogin: true });
+      app.setLoginItemSettings({ openAtLogin: true, name: 'ChettiHelper' });
       await fs.writeFile(path.join(data, 'autostart.txt'), '1');
     }
     try {
@@ -53,7 +65,7 @@ else {
       { label: label(), enabled: false },
       { label: 'Arbeitsspeicher freigeben', click: () => void helper.runtime.stopAll().then(render) },
       { type: 'separator' },
-      { label: 'Beenden', click: () => { void helper.close().finally(() => app.quit()); } },
+      { label: 'Beenden', click: () => app.quit() },
     ]));
     render();
     setInterval(render, 5000).unref();
