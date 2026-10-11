@@ -27,6 +27,30 @@ jobs:
       - run: node scripts/helper/build.mjs
         env:
           CHETTI_KNOWLEDGE_URL: ${{ secrets.CHETTI_KNOWLEDGE_URL }}
+      - name: Probelauf (installieren, starten, abfragen, entfernen)
+        shell: pwsh
+        env:
+          CHETTI_HELPER_TEST: '1'
+        run: |
+          $installer = Get-ChildItem build/helper-app/release/*.exe | Select-Object -First 1
+          Start-Process $installer.FullName -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Chetti Helfer.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Programm nicht installiert.' }
+          Start-Process $exe.FullName
+          $info = $null
+          foreach ($i in 1..30) {
+            Start-Sleep -Seconds 2
+            $info = curl.exe -sk https://127.0.0.1:47813/helper/info
+            if ($info) { break }
+          }
+          if (-not $info) { Get-Content "$env:APPDATA\Chetti Helfer\helfer.log" -ErrorAction SilentlyContinue; throw 'Der Helfer antwortet nicht.' }
+          $info
+          if (-not (Test-Path "$env:APPDATA\Chetti Helfer\wissen\stil")) { throw 'Wissensbasis fehlt.' }
+          Stop-Process -Name 'Chetti Helfer' -Force
+          $uninstaller = Get-ChildItem $exe.DirectoryName -Filter 'Uninstall*.exe' | Select-Object -First 1
+          Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path $exe.FullName) { throw 'Programm nach der Deinstallation noch vorhanden.' }
       - uses: actions/upload-artifact@v4
         with:
           name: Chetti-Helfer-win
