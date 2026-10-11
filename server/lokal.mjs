@@ -21,6 +21,12 @@ export const LOCAL_DEFAULTS = { sttUrl: 'http://127.0.0.1:8178/v1', sttModel: 'w
  * dazu die Spracherkennung. Gemessen: reports/KPI-Status lokal gegen Cloud.md (8B 15 bis 17 von 17 Fakten, 3B 13).
  */
 export const localPackage = (totalmem = os.totalmem()) => ({ llm: totalmem >= 15.5e9 ? 'ministral-3:8b' : 'ministral-3:3b', stt: 'whisper-large-v3-turbo' });
+/**
+ * Fenster des Sprachmodells in Tokens. Es belegt Arbeitsspeicher, auch wenn es leer bleibt: Ministral 3B braucht über Ollama
+ * mit 16.384 Tokens 4,1 GB, mit 4.096 Tokens 2,7 GB (gemessen 2026-10-12). Die Live-Fakten schicken je Abschnitt nur einen
+ * Bruchteil davon; das kleine Modell für Rechner mit 8 GB bekommt deshalb das kleine Fenster.
+ */
+export const localContext = model => (model === 'ministral-3:3b' ? 4096 : 16384);
 // Lokale Modelle brauchen je nach Rechner deutlich länger als ein Cloud-Endpoint.
 const TIMEOUT_MS = 10 * 60_000;
 // Diese Modelle liefern nur ohne Denkphase eine Notiz (reports/Notiztest lokale Modelle.md).
@@ -30,11 +36,13 @@ export function localConfig(env = process.env) {
   const config = {
     sttUrl: env.CHETTI_LOCAL_STT_URL || LOCAL_DEFAULTS.sttUrl, sttModel: env.CHETTI_LOCAL_STT_MODEL || LOCAL_DEFAULTS.sttModel,
     llmUrl: env.CHETTI_LOCAL_LLM_URL || LOCAL_DEFAULTS.llmUrl, llmModel: env.CHETTI_LOCAL_LLM_MODEL || (env.CHETTI_WEG === 'lokal' ? localPackage().llm : LOCAL_DEFAULTS.llmModel),
+    llmContext: 0,
     // Optional: Entscheidungsmodell (Jev-Schnittstelle, server/entscheider.mjs) für Fachgebiet und Belegprüfung statt des Sprachmodells.
     // Live-Fakten (server/livefakten.mjs): Notiz entsteht während der Aufnahme. CHETTI_LOCAL_LIVE=0 schaltet auf die Notiz in einem Aufruf zurück.
     live: env.CHETTI_LOCAL_LIVE !== '0',
     deciderUrl: env.CHETTI_LOCAL_DECIDER_URL || '', deciderModel: env.CHETTI_LOCAL_DECIDER_MODEL || 'kev-latest', deciderTasks: (env.CHETTI_LOCAL_DECIDER_TASKS || 'choose').split(',').map(t => t.trim()).filter(Boolean),
   };
+  config.llmContext = Number(env.CHETTI_LOCAL_LLM_CONTEXT) || localContext(config.llmModel);
   for (const key of ['sttUrl', 'llmUrl', ...(config.deciderUrl ? ['deciderUrl'] : [])]) {
     let host = '';
     try { host = new URL(config[key]).hostname; } catch { /* ungültige Adresse */ }
@@ -43,6 +51,14 @@ export function localConfig(env = process.env) {
   }
   return config;
 }
+
+// Auftrag, Schreibprofil und Vorlage der Notiz in einem Aufruf sowie Platz für die Antwort (Tokens, geschätzt).
+const PROMPT_RESERVE = 2700;
+/** Teilt einen langen Text an Satzenden in Stücke, die das Sprachmodell einzeln auswertet. */
+const pieces = (text, size = 1200) => (text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]).reduce((parts, sentence) => {
+  if (parts.length && parts.at(-1).length + sentence.length <= size) parts[parts.length - 1] += sentence; else parts.push(sentence);
+  return parts;
+}, []).map(part => part.trim()).filter(Boolean);
 
 /** Klassifizierer am lokalen Sprachmodell; die knappen Zeitlimits der Cloud-Aufrufe gelten hier nicht. */
 class LocalClassifier extends Classifier {
@@ -75,6 +91,23 @@ export class LocalProvider extends MistralProvider {
     return response.json();
   }
   request(config, route, init, signal) { return this.requestOpenRouter(config, route, init, signal); }
+  /**
+   * Notiz in einem Aufruf (Rückfall der Live-Fakten, eingefügte Transkripte, Briefe). Passt das Gespräch nicht in das Fenster
+   * des Sprachmodells, schnitte der Dienst es still ab; es wird deshalb erst abschnittsweise zu Stichpunkten verdichtet.
+   */
+  async summarize(segments, config, signal) {
+    const room = (this.local.llmContext - PROMPT_RESERVE) * 3; // etwa drei Zeichen je Token
+    if (this.live && segments.reduce((sum, s) => sum + s.text.length, 0) > room) segments = await this.condense(segments, signal);
+    return super.summarize(segments, config, signal);
+  }
+  async condense(segments, signal) {
+    const state = this.live.start();
+    let before;
+    for (const segment of segments) for (const text of pieces(segment.text)) { const part = { id: segment.id, text }; await this.live.add(state, part, before, signal); before = part; }
+    const lines = state.lines.filter(l => !l.gone);
+    const short = segments.map(s => ({ ...s, text: lines.filter(l => l.id === s.id).map(l => l.text).join('. ') })).filter(s => s.text);
+    return short.length ? short : segments;
+  }
   /** Keine Sprecher je Satz: das Transkript bleibt, wie es transkribiert wurde. */
   async speakers() { return null; }
   /** Erreichbarkeit beider Dienste, ohne Gesprächsdaten. `llmReady`: das gewählte Modell ist geladen bzw. vorhanden. */

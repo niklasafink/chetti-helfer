@@ -29,6 +29,8 @@ const BLOCKED = /^(auth|dev)\./;
 export async function createHelper({ directory, port = DEFAULT_PORT, tls, origins = DEFAULT_ORIGINS, version = '0.1.0', hardware = assess(), runtime, provider, fetcher = fetch, home = os.homedir(), idleMs } = {}) {
   const env = { ...process.env, CHETTI_WEG: 'lokal', ...(hardware.tier && !process.env.CHETTI_LOCAL_LLM_MODEL ? { CHETTI_LOCAL_LLM_MODEL: hardware.tier } : {}) };
   const config = localConfig(env);
+  // Ollama bekommt das Fenster beim Start (server/modelle.mjs); eine eigene Angabe des Nutzers hat Vorrang.
+  process.env.OLLAMA_CONTEXT_LENGTH ||= String(config.llmContext);
   runtime ??= new Runtime({ idleMs, services: { stt: whisperService({ config, home, fetcher }), llm: ollamaService({ config, home, fetcher }) } });
   // Anfragen der Pipeline (Audio, Chat) starten den passenden Dienst bei Bedarf und halten ihn am Leben; Abfragen des Stands (GET) nicht.
   const guarded = (url, init) => {
@@ -63,7 +65,7 @@ export async function createHelper({ directory, port = DEFAULT_PORT, tls, origin
 
     if (req.method === 'GET' && pathname === '/helper/info') {
       const { ramGb, cores, platform, arch, capable, reason, tier } = hardware;
-      return json(200, { name: 'chetti-helper', version, protocol: 1, hardware: { ramGb, cores, platform, arch }, capable, reason, paket: [config.llmModel, config.sttModel], tier, runtime: runtime.snapshot() });
+      return json(200, { name: 'chetti-helper', version, protocol: 1, hardware: { ramGb, cores, platform, arch }, capable, reason, paket: [config.llmModel, config.sttModel], tier, context: config.llmContext, runtime: runtime.snapshot() });
     }
     // Alles Weitere verlangt einen erlaubten Origin: auch einfache Anfragen ohne Vorprüfung kommen nur aus der Webapp.
     if (req.method !== 'POST' || !allowed) return json(req.method === 'POST' ? 403 : 405, { error: req.method === 'POST' ? 'Diese Anfrage ist nicht erlaubt.' : 'Methode nicht erlaubt.' });

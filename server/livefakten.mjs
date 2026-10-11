@@ -97,7 +97,11 @@ const refersBack = text => /^(dann|ja|nein|doch|genau|also|und|aber|deshalb|daf�
 /** Die Zeile handelt von etwas, das im Abschnitt vorkommt: ihr erstes Wort und die Mehrzahl ihrer Wörter sind dort gesagt. */
 const grounded = (line, text) => { const words = [...stems(line)].filter(w => !/\d/.test(w)), said = stems(text); return words.length > 0 && said.has(words[0]) && words.filter(w => said.has(w)).length / words.length >= 0.6; };
 const NACHFRAGE = numbers => `In diesen Zeilen stehen Zahlen, die im Abschnitt nicht gesagt wurden (${numbers}). Schreibe die Zeilen neu, nur mit Zahlen aus dem Abschnitt, jede genau wie gesagt. Kommt die Angabe einer Zeile im Abschnitt gar nicht vor, lass die Zeile weg. Danach „ENDE“.`;
-const PRUEFEN = ' (Zahl prüfen)';
+/** Die Stellen einer Zeile, an denen eine nicht gesagte Zahl steht, samt Schema oder Wertepaar („0-1-1“, „104/90“); ohne Fundstelle die ganze Zeile. */
+const marksOf = (text, foreign) => {
+  const marks = (text.match(/\d+(?:[.,]\d+)?(?:[-\/]\d+(?:[.,]\d+)?)*/g) ?? []).filter(token => [...numbersOf(token.replace(/[-\/]/g, ' '))].some(z => foreign.has(z)));
+  return [...new Set(marks.length ? marks : [text])].slice(0, 5);
+};
 
 /** Ordnet die fünf Kategorien den Abschnitten einer Vorlage zu; null, wenn die Vorlage Abschnitte hat, die keine Kategorie füllen kann. */
 export function sectionMap(template) {
@@ -147,11 +151,14 @@ export class LiveFacts {
     const foreign = line => [...numbersOf(line.text)].filter(z => !known.has(z));
     const all = parse(await this.complete(messages, 500, signal)), lines = all.filter(l => !foreign(l).length), doubtful = all.filter(l => foreign(l).length);
     if (doubtful.length) {
-      // Statt die Angabe still zu verlieren: einmal nachfragen. Bleibt die Zahl fremd, steht die Zeile mit Vermerk in der Notiz,
-      // sofern sie von etwas Gesagtem handelt; Erfundenes (etwa aus den Beispielen des Auftrags) entfällt.
+      // Statt die Angabe still zu verlieren: einmal nachfragen. Bleibt die Zahl fremd, steht die Zeile trotzdem in der Notiz,
+      // sofern sie von etwas Gesagtem handelt, und die Zahl wird dort grau markiert (`marks`); Erfundenes (etwa aus den
+      // Beispielen des Auftrags) entfällt.
       const retry = await this.complete([...messages, { role: 'assistant', content: `${doubtful.map(l => `${l.kat}|${l.text}`).join('\n')}\nENDE\n` }, { role: 'user', content: NACHFRAGE([...new Set(doubtful.flatMap(foreign))].join(', ')) }], 300, signal).then(parse, () => []);
-      const fixed = retry.filter(l => !foreign(l).length).slice(0, doubtful.length);
-      lines.push(...fixed, ...doubtful.filter(l => grounded(l.text, text) && !fixed.some(f => overlap(f.text, l.text) >= 0.5)).map(l => ({ ...l, text: l.text + PRUEFEN })));
+      // Die Antwort zählt nur mit ihrem Thema: „3×/d, max. 3 Tage“ ohne das Medikament stünde ohne Bezug in der Notiz.
+      const subject = line => [...stems(line.text)].find(w => !/\d/.test(w));
+      const fixed = retry.filter(l => !foreign(l).length && doubtful.some(d => subject(d) && stems(l.text).has(subject(d)))).slice(0, doubtful.length);
+      lines.push(...fixed, ...doubtful.filter(l => grounded(l.text, text) && !fixed.some(f => subject(f) === subject(l))).map(l => ({ ...l, marks: marksOf(l.text, new Set(foreign(l))) })));
     }
     for (const line of lines) {
       const live = state.lines.filter(f => !f.gone), nums = t => [...numbersOf(t)];
@@ -167,6 +174,9 @@ export class LiveFacts {
     }
     state.ms += performance.now() - started; state.chars += text.length;
   }
+
+  /** Unsichere Zahlen der Notiz: je Zeile ihr Text und die Stellen, die die Oberfläche grau zeigt, bis die Zeile geändert wird. */
+  doubts(state) { return state.lines.filter(l => !l.gone && l.marks?.length).map(l => ({ text: l.text, marks: l.marks })); }
 
   /**
    * Notizinhalt im Format der KI-Antwort (für validateSummary): mit Vorlage in deren Abschnitten, sonst als flache Liste

@@ -59,11 +59,13 @@ export function validateWav(encoded) {
 }
 
 export class ChettiService {
-  constructor({ directory, provider = new MistralProvider(), now = Date.now, keyStore, notes } = {}) {
+  constructor({ directory, provider = new MistralProvider(), now = Date.now, keyStore, notes, sessions } = {}) {
     this.directory = directory;
     this.notes = notes ?? new NoteStore(path.join(directory, 'notes'), now);
     this.provider = provider; this.now = now; this.keyStore = keyStore;
     this.sessions = new Map();
+    // Gehostet (server/session-store.mjs): Der Stand laufender Sitzungen liegt zusätzlich im Speicher, weil die Anfragen einer Aufnahme auf verschiedenen Instanzen ankommen.
+    this.sessionStore = sessions ?? null;
     // Laufende „Neu generieren“-Aufträge je Notiz; das Transkript dafür kommt aus dem Notizspeicher.
     this.regenerating = new Map();
     // Verhältnis gemessene zu erwarteter Dauer der Notiz in einem Aufruf (restMs); gleitend aus den letzten Notizen.
@@ -103,6 +105,27 @@ export class ChettiService {
   }
   /** Eine Sitzung spricht gerade mit dem Anbieter (Transkription oder Zusammenfassung). */
   hasBusySession() { return [...this.sessions.values()].some(s => !s.noteId && (s.busy || s.finishing)); }
+  /** Platz für eine weitere Sitzung im Arbeitsspeicher. Mit Sitzungsspeicher weicht die am längsten unberührte, sie lässt sich von dort wieder laden. */
+  room() {
+    if (this.sessions.size < 10) return;
+    const idle = this.sessionStore && [...this.sessions].filter(([, x]) => !x.busy && !x.finishing).sort((a, b) => a[1].touched - b[1].touched)[0];
+    if (!idle) throw new Error('Zu viele offene Sitzungen. Bitte alte Sitzungen schließen.');
+    this.sessions.delete(idle[0]);
+  }
+  /** Mit Sitzungsspeicher gilt dessen Stand: Eine andere Instanz kann die Sitzung begonnen, Abschnitte ergänzt oder die Notiz erstellt haben. */
+  async storedSession(id) {
+    let s = this.sessions.get(id);
+    if (!s?.noteId) {
+      const stored = await this.sessionStore.load(id, s?.segments.length ?? 0);
+      if (!stored) { this.sessions.delete(id); s = null; }
+      else {
+        if (!s) { this.room(); s = { touched: this.now(), config: { ...this.config, ...stored.meta?.config }, controller: new AbortController(), segments: [], hashes: [], busy: false, noteId: null, draft: null, spoken: null }; this.sessions.set(id, s); }
+        for (const entry of stored.entries) { s.segments.push(entry.segment); s.hashes.push(entry.hash); s.audioSeconds = (s.audioSeconds ?? 0) + (entry.seconds || 0); }
+        if (stored.noteId) { s.noteId = stored.noteId; s.segments = []; s.hashes = []; }
+      }
+    }
+    return this.getSession(id);
+  }
   getSession(id) {
     this.sweep();
     const s = this.sessions.get(id);
@@ -118,7 +141,7 @@ export class ChettiService {
   /** Live-Fakten (server/livefakten.mjs): jeder neue Abschnitt wird im Hintergrund ausgewertet, einer nach dem anderen. */
   collect(s) {
     const live = this.provider.live;
-    if (!live || s.live?.failed) return;
+    if (!live || s.live?.failed || this.sessionStore) return;
     s.live ??= { state: live.start(), chain: Promise.resolve(), open: [], failed: false, startedAt: 0 };
     const job = s.live, segment = s.segments.at(-1), before = s.segments.at(-2);
     job.open.push(segment.text.length);
@@ -189,15 +212,16 @@ export class ChettiService {
       case 'session.start': {
         this.sweep();
         if (!this.provider.local && (!this.openRouterApiKey || (!this.config.model.startsWith('mistralai/') && !this.mistralApiKey))) throw new Error(this.config.model.startsWith('mistralai/') ? 'Bitte zuerst einen OpenRouter-API-Schlüssel hinterlegen.' : 'Bitte Mistral- und OpenRouter-API-Schlüssel hinterlegen.');
-        if (this.sessions.size >= 10) throw new Error('Zu viele offene Sitzungen. Bitte alte Sitzungen schließen.');
+        this.room();
         const id = randomUUID();
         const session = { touched: this.now(), config: { ...this.config }, controller: new AbortController(), segments: [], hashes: [], busy: false, noteId: null, draft: null, spoken: null };
         this.sessions.set(id, session);
+        if (this.sessionStore) { await this.sessionStore.create(id, { config: session.config }); void this.sessionStore.prune().catch(() => {}); }
         void this.provider.live?.warm(session.controller.signal);
         return { id };
       }
       case 'session.transcribe': {
-        const s = this.getSession(payload.id);
+        const s = this.sessionStore ? await this.storedSession(payload.id) : this.getSession(payload.id);
         if (s.noteId || s.finishing) throw new Error('Diese Aufnahme ist bereits abgeschlossen.');
         const wav = validateWav(payload.audio);
         // Demo ohne Konto: Aufnahmezeit je Sitzung begrenzt (16 kHz, 16 Bit, mono = 32.000 Byte je Sekunde).
@@ -213,21 +237,25 @@ export class ChettiService {
           const text = await this.provider.transcribe(wav, this.providerConfig(s), s.controller.signal, payload.language === 'auto' ? 'auto' : isLocale(payload.language) ? payload.language : 'de');
           if (s.controller.signal.aborted) throw new Error('Sitzung verworfen.');
           const preceding = s.segments.map(x => x.text).join(' ');
-          s.segments.push({ id: `s${payload.index + 1}`, text: await this.correct(s, mergeTranscript(preceding, text)) });
+          const segment = { id: `s${payload.index + 1}`, text: await this.correct(s, mergeTranscript(preceding, text)) };
+          await this.sessionStore?.append(payload.id, payload.index, { segment, hash, seconds });
+          s.segments.push(segment);
           s.hashes.push(hash); s.audioSeconds = (s.audioSeconds ?? 0) + seconds; s.touched = this.now();
           this.collect(s);
           return { segments: s.segments };
         } finally { wav.fill(0); s.busy = false; }
       }
       case 'session.text': {
-        const s = this.getSession(payload.id);
+        const s = this.sessionStore ? await this.storedSession(payload.id) : this.getSession(payload.id);
         if (s.busy || s.finishing || s.noteId || s.segments.length) throw new Error('In dieser Sitzung ist bereits eine Aufnahme vorhanden.');
         if (typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 160000) throw new Error('Bitte ein gültiges Transkript einfügen.');
         if (context.maxTextChars && payload.text.length > context.maxTextChars) throw new Error('Die Demo nimmt Texte bis 8.000 Zeichen an. Für längere Texte bitte ein Konto anlegen.');
-        s.segments = [{ id: 's1', text: await this.correct(s, payload.text.trim()) }]; return { segments: s.segments };
+        const segment = { id: 's1', text: await this.correct(s, payload.text.trim()) };
+        await this.sessionStore?.append(payload.id, 0, { segment, hash: '', seconds: 0 });
+        s.segments = [segment]; return { segments: s.segments };
       }
       case 'session.summarize': {
-        const s = this.getSession(payload.id);
+        const s = this.sessionStore ? await this.storedSession(payload.id) : this.getSession(payload.id);
         // Die Vorlage darf bis zum Beenden gewechselt werden: Sie kommt mit der Anfrage, nicht aus dem Stand beim Sitzungsstart.
         const style = payload.style ?? s.config.style;
         if (typeof style !== 'string' || style.length > 3000) throw new Error('Ungültige Vorlage.');
@@ -251,7 +279,7 @@ export class ChettiService {
             // Live-Fakten: Die Zeilen liegen bis auf den letzten Abschnitt schon vor; sie kommen in die Abschnitte der Vorlage.
             await s.live.chain;
             const tpl = parseTemplate(style).template, value = s.live.failed ? null : this.provider.live.note(s.live.state, tpl);
-            if (value) try { s.draft = { body: validateSummary(value, spoken, tpl), patient: validatePatient(spokenName(spoken), spoken), hints: [] }; } catch { /* sonst die Notiz in einem Aufruf */ }
+            if (value) try { s.draft = { body: validateSummary(value, spoken, tpl), patient: validatePatient(spokenName(spoken), spoken), hints: [], doubts: this.provider.live.doubts(s.live.state) }; } catch { /* sonst die Notiz in einem Aufruf */ }
           }
           if (!s.draft) {
             if (!s.noteStartedAt) { s.noteStartedAt = performance.now(); s.noteChars = spoken.reduce((sum, x) => sum + x.text.length, 0); }
@@ -261,12 +289,13 @@ export class ChettiService {
           }
           s.draftStyle = style;
           if (s.controller.signal.aborted) throw new Error('Sitzung verworfen.');
-          const note = await this.notes.create(s.draft.body, s.config.model, s.draft.patient, template, s.draft.hints);
+          const note = await this.notes.create(s.draft.body, s.config.model, s.draft.patient, template, s.draft.hints, s.draft.doubts);
           // Das Transkript wird zur Notiz abgelegt und nach 7 Tagen automatisch gelöscht: Bis dahin lässt es sich ansehen,
           // kopieren und die Notiz mit einer anderen Vorlage neu erstellen. Ohne Transkript gibt es keine Notiz.
           try { await this.notes.writeTranscript(note.id, spoken); } catch (error) { await this.notes.remove(note.id).catch(() => {}); throw error; }
           if (s.controller.signal.aborted) { await this.notes.remove(note.id); throw new Error('Sitzung verworfen.'); }
           s.noteId = note.id; s.hashes = []; s.draft = null; s.spoken = null; s.segments = []; s.live = null;
+          if (this.sessionStore) await this.sessionStore.finish(payload.id, note.id).catch(() => {});
           return { ...note, transcriptUntil: this.notes.transcriptUntil(note.id) };
         })();
         try { return await s.finishing; } finally { s.finishing = null; s.noteStartedAt = 0; }
@@ -302,7 +331,9 @@ export class ChettiService {
       case 'session.discard': {
         const s = this.sessions.get(payload.id); s?.controller.abort();
         if (s) { s.segments = []; s.hashes = []; s.draft = null; s.spoken = null; }
-        this.sessions.delete(payload.id); return { ok: true };
+        this.sessions.delete(payload.id);
+        if (this.sessionStore) await this.sessionStore.remove(payload.id).catch(() => {});
+        return { ok: true };
       }
       case 'notes.list': return this.notes.list();
       case 'notes.update': return this.notes.update(payload.id, payload.body);

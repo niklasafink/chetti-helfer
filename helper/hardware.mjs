@@ -1,7 +1,8 @@
 /**
  * Hardware-Check des Chetti-Helfers: Reicht dieser Rechner für den lokalen Weg, und welches Sprachmodell trägt er?
  *
- * Grenzen nach Arbeitsspeicher wie `localPackage` (server/lokal.mjs): ab 16 GB Ministral 8B, ab 8 GB Ministral 3B.
+ * Grenzen nach Arbeitsspeicher wie `localPackage` (server/lokal.mjs): ab 16 GB Ministral 8B mit 16.384 Tokens Fenster, ab 8 GB
+ * Ministral 3B mit 4.096 Tokens (`localContext`; mit Spracherkennung rund 4,4 GB während einer Konsultation).
  * Darunter, oder mit weniger als vier Prozessorkernen, ist der Rechner zu schwach; Konten weichen dann nicht auf die Cloud aus,
  * die Oberfläche meldet es nur. Die Grenzen sind vorläufig: gemessen ist nur ein M1 mit 16 GB (reports/KPI-Status lokal gegen Cloud.md),
  * ein Büro-PC ohne Grafikkarte ist es nicht.

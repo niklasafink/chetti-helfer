@@ -29,6 +29,13 @@ export function readHints(raw) {
   return [...new Set(raw.filter(h => typeof h === 'string').map(h => h.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[.:;,]+$/, '')).filter(h => h && h.length <= 40))].slice(0, 3);
 }
 
+/** Unsichere Zahlen einer Notiz (server/livefakten.mjs): Text der Zeile und die markierten Stellen darin. */
+export function readDoubts(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(d => d && typeof d.text === 'string' && d.text.length <= 200 && Array.isArray(d.marks))
+    .map(d => ({ text: d.text, marks: d.marks.filter(m => typeof m === 'string' && m && m.length <= 200 && d.text.includes(m)).slice(0, 5) })).filter(d => d.marks.length).slice(0, 12);
+}
+
 export class NoteStore {
   constructor(directory, now = Date.now) { this.directory = directory; this.now = now; }
   async init() { await mkdir(this.directory, { recursive: true, mode: 0o700 }); await this.prune(); }
@@ -65,20 +72,22 @@ export class NoteStore {
       }
     }
   }
-  async create(body, model, patient = '', template = null, hints = []) {
+  async create(body, model, patient = '', template = null, hints = [], doubts = []) {
     const id = `${this.now()}_${randomUUID()}`;
-    return this.write(id, body, model, patient, template, hints);
+    return this.write(id, body, model, patient, template, hints, doubts);
   }
   /** `template`: die Vorlage, mit der die Notiz entstand (bereinigt über readTemplate in service.mjs); bleibt beim Bearbeiten erhalten. */
-  async write(id, body, model, patient = '', template = null, hints = []) {
+  async write(id, body, model, patient = '', template = null, hints = [], doubts = []) {
     if (typeof body !== 'string' || !body.trim() || body.length > 20000) throw new Error('Die Notiz ist leer oder zu lang.');
     hints = readHints(hints);
+    // Eine unsichere Zahl gilt, solange ihre Zeile unverändert in der Notiz steht.
+    doubts = readDoubts(doubts).filter(d => body.includes(d.text));
     this.file(id);
     if (this.expired(id)) throw new Error('Diese Notiz ist abgelaufen.');
     const created = this.created(id);
-    const metadata = { id, createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RETENTION_MS).toISOString(), model, ...(patient && { patient }), ...(template && { template }), ...(hints.length && { hints }), format: 1 };
+    const metadata = { id, createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RETENTION_MS).toISOString(), model, ...(patient && { patient }), ...(template && { template }), ...(hints.length && { hints }), ...(doubts.length && { doubts }), format: 1 };
     await this.atomic(this.file(id), `---\n${JSON.stringify(metadata)}\n---\n\n${body.trim()}\n`);
-    return { ...metadata, patient: patient || '', template: template ?? null, hints, body: body.trim(), transcriptUntil: await this.hasTranscript(id) ? this.transcriptUntil(id) : null };
+    return { ...metadata, patient: patient || '', template: template ?? null, hints, doubts, body: body.trim(), transcriptUntil: await this.hasTranscript(id) ? this.transcriptUntil(id) : null };
   }
   async get(id) {
     const file = this.file(id);
@@ -90,7 +99,7 @@ export class NoteStore {
     if (!match) throw new Error('Die Notizdatei ist beschädigt.');
     const metadata = JSON.parse(match[1]);
     const created = this.created(id);
-    return { id, createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RETENTION_MS).toISOString(), model: metadata.model, patient: typeof metadata.patient === 'string' ? metadata.patient : '', template: metadata.template && typeof metadata.template === 'object' ? metadata.template : null, hints: readHints(metadata.hints), body: match[2].trim(), transcriptUntil: await this.hasTranscript(id) ? this.transcriptUntil(id) : null };
+    return { id, createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RETENTION_MS).toISOString(), model: metadata.model, patient: typeof metadata.patient === 'string' ? metadata.patient : '', template: metadata.template && typeof metadata.template === 'object' ? metadata.template : null, hints: readHints(metadata.hints), doubts: readDoubts(metadata.doubts), body: match[2].trim(), transcriptUntil: await this.hasTranscript(id) ? this.transcriptUntil(id) : null };
   }
   async list() {
     await this.prune();
@@ -102,9 +111,9 @@ export class NoteStore {
     }
     return notes.sort((a, b) => b.id.localeCompare(a.id));
   }
-  async update(id, body) { const old = await this.get(id); return this.write(id, body, old.model, old.patient, old.template, old.hints); }
+  async update(id, body) { const old = await this.get(id); return this.write(id, body, old.model, old.patient, old.template, old.hints, old.doubts); }
   /** Erledigte Hinweise fallen weg; der Notiztext bleibt. */
-  async setHints(id, hints) { const old = await this.get(id); return this.write(id, old.body, old.model, old.patient, old.template, hints); }
+  async setHints(id, hints) { const old = await this.get(id); return this.write(id, old.body, old.model, old.patient, old.template, hints, old.doubts); }
   async remove(id) {
     await unlink(this.file(id)).catch(e => { if (e.code !== 'ENOENT') throw e; });
     await this.removeTranscript(id);
