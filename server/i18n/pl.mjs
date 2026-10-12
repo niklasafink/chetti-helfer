@@ -82,6 +82,7 @@ export default {
  "Ungültiges Transkript.": "Nieprawidłowa transkrypcja.",
  "Ungültige Notizdatei.": "Nieprawidłowy plik notatki.",
  "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "Na tej instancji klucze API są zarządzane za pomocą zmiennych środowiskowych.",
+ "Bitte Ihren Namen eingeben.": "Podaj swoje imię i nazwisko.",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "Podaj prawidłowy adres e-mail.",
  "Das Passwort braucht mindestens 8 Zeichen.": "Hasło musi mieć co najmniej 8 znaków.",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "Dla tego adresu e-mail istnieje już konto. Zaloguj się.",

@@ -82,6 +82,7 @@ export default {
  "Ungültiges Transkript.": "Invalid transcript.",
  "Ungültige Notizdatei.": "Invalid note file.",
  "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "On this instance, API keys are managed via environment variables.",
+ "Bitte Ihren Namen eingeben.": "Please enter your name.",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "Please enter a valid email address.",
  "Das Passwort braucht mindestens 8 Zeichen.": "The password needs at least 8 characters.",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "There is already an account for this email address. Please log in.",

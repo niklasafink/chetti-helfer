@@ -93,6 +93,9 @@ export async function findBinary(name, { dirs = [] } = {}) {
 
 const modelFile = home => path.join(home, '.cache', 'chetti', CATALOG.find(m => m.kind === 'stt').file);
 
+/** Rechenfäden der Spracherkennung: whisper-server nimmt von sich aus höchstens vier; Rechner mit mehr Kernen bekommen die Hälfte ihrer logischen Kerne, höchstens acht. */
+export const sttThreads = (cpus = os.cpus().length) => Math.max(4, Math.min(8, Math.floor(cpus / 2)));
+
 /** whisper.cpp `whisper-server` am Loopback, wie scripts/lokal.mjs: Beam-Suche mit fünf Pfaden, Sprache automatisch. */
 export function whisperService({ config, home = os.homedir(), fetcher = fetch, binary = () => findBinary('whisper-server'), exists = file => access(file).then(() => true, () => false) } = {}) {
   return {
@@ -103,7 +106,7 @@ export function whisperService({ config, home = os.homedir(), fetcher = fetch, b
       if (!(await exists(model))) throw missing('Die Spracherkennung ist noch nicht geladen.');
       const exe = await binary();
       if (!exe) throw missing('Das Spracherkennungsprogramm (whisper-server) fehlt.');
-      const child = spawn(exe, ['-m', model, '--host', '127.0.0.1', '--port', url.port, '--inference-path', `${url.pathname.replace(/\/$/, '')}/audio/transcriptions`, '-l', 'auto', '-bs', '5'], { stdio: 'ignore', windowsHide: true });
+      const child = spawn(exe, ['-m', model, '--host', '127.0.0.1', '--port', url.port, '--inference-path', `${url.pathname.replace(/\/$/, '')}/audio/transcriptions`, '-l', 'auto', '-bs', '5', '-t', String(sttThreads())], { stdio: 'ignore', windowsHide: true });
       let dead = false;
       // Endet der Helfer, ohne die Dienste zu schließen, soll die Spracherkennung nicht verwaist weiterlaufen.
       const bye = () => child.kill();

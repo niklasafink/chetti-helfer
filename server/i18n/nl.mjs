@@ -82,6 +82,7 @@ export default {
  "Ungültige Notizdatei.": "Ongeldig notitiebestand.",
  "Ungültige Textbausteine.": "Ongeldige tekstblokken.",
  "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "API-sleutels worden op deze instantie via omgevingsvariabelen beheerd.",
+ "Bitte Ihren Namen eingeben.": "Voer uw naam in.",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "Voer een geldig e-mailadres in.",
  "Das Passwort braucht mindestens 8 Zeichen.": "Het wachtwoord moet minstens 8 tekens hebben.",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "Er bestaat al een account voor dit e-mailadres. Meld u aan.",

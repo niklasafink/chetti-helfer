@@ -82,6 +82,7 @@ export default {
   "Ungültiges Transkript.": "Geçersiz transkript.",
   "Ungültige Notizdatei.": "Geçersiz not dosyası.",
   "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "Bu kurulumda API anahtarları ortam değişkenleri üzerinden yönetilir.",
+ "Bitte Ihren Namen eingeben.": "Lütfen adınızı girin.",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "Lütfen geçerli bir e-posta adresi girin.",
  "Das Passwort braucht mindestens 8 Zeichen.": "Parola en az 8 karakter olmalı.",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "Bu e-posta adresi için zaten bir hesap var. Lütfen giriş yapın.",

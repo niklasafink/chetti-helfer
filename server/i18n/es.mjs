@@ -82,6 +82,7 @@ export default {
  "Ungültiges Transkript.": "Transcripción no válida.",
  "Ungültige Notizdatei.": "Archivo de nota no válido.",
  "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "En esta instancia, las claves de API se gestionan mediante variables de entorno.",
+ "Bitte Ihren Namen eingeben.": "Introduce tu nombre.",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "Introduce una dirección de correo válida.",
  "Das Passwort braucht mindestens 8 Zeichen.": "La contraseña necesita al menos 8 caracteres.",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "Ya existe una cuenta con este correo. Inicia sesión.",

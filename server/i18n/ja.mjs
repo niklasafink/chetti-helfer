@@ -82,6 +82,7 @@ export default {
  "Ungültiges Transkript.": "文字起こしが無効です。",
  "Ungültige Notizdatei.": "記録ファイルが無効です。",
  "API-Schlüssel werden auf dieser Instanz über Umgebungsvariablen verwaltet.": "このインスタンスでは、APIキーは環境変数で管理されています。",
+ "Bitte Ihren Namen eingeben.": "お名前を入力してください。",
  "Bitte eine gültige E-Mail-Adresse eingeben.": "有効なメールアドレスを入力してください。",
  "Das Passwort braucht mindestens 8 Zeichen.": "パスワードは8文字以上必要です。",
  "Für diese E-Mail-Adresse gibt es schon ein Konto. Bitte anmelden.": "このメールアドレスのアカウントは既にあります。ログインしてください。",
