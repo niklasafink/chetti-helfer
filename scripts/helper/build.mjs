@@ -40,6 +40,7 @@ writeFileSync(path.join(stage, 'package.json'), JSON.stringify({
     appId: 'de.chetti.helper', productName: 'Chetti Helfer', electronVersion: pkg.devDependencies.electron.replace(/^[^\d]*/, ''),
     directories: { output: 'release' }, files: ['helper/**/*', 'server/**/*', 'package.json'],
     extraResources: [{ from: 'bin', to: 'bin' }],
+    protocols: [{ name: 'Chetti Helfer', schemes: ['chetti-helfer'] }],
     mac: { category: 'public.app-category.medical', electronLanguages: ['de', 'en'], target: process.argv.includes('--dmg') ? ['dmg'] : ['dir'], ...(!signed && { identity: null }), extendInfo: { LSUIElement: true } },
     win: { target: 'nsis' }, nsis: { artifactName: 'Chetti-Helfer-Setup.exe', oneClick: true, perMachine: false, deleteAppDataOnUninstall: true, include: 'helper/installer.nsh' },
   },

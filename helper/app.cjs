@@ -1,6 +1,7 @@
 /**
  * Chetti-Helfer als Programm: läuft ohne Fenster im Hintergrund, ein Symbol in der Menüleiste (macOS) bzw. im Infobereich (Windows)
  * zeigt den Stand und beendet ihn. Beim ersten Start trägt es das Zertifikat im System ein und schaltet den Start beim Anmelden ein.
+ * Über das Schema `chetti-helfer:` startet die Webapp einen beendeten Helfer wieder (startHelper in lib/helper.ts).
  * Paketiert über scripts/helper/build.mjs; die Spracherkennung liegt dann in `resources/bin`.
  */
 const { app, Tray, Menu, nativeImage } = require('electron');
@@ -18,6 +19,8 @@ if (process.platform === 'darwin') app.dock?.hide();
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('window-all-closed', event => event.preventDefault());
+  // Aufruf über `chetti-helfer:`: Läuft der Helfer schon, ist nichts zu tun (ein zweiter Start endet an der Sperre oben).
+  app.on('open-url', event => event.preventDefault());
   // Beim Beenden (Menü, Abmelden, Signal) enden auch Spracherkennung und Sprachmodell; sonst belegen sie weiter Speicher,
   // und der nächste Start hält sie für fremde Dienste und beendet sie nie.
   let closing = false, closed = false;
@@ -34,6 +37,8 @@ else {
   const log = error => fs.mkdir(data, { recursive: true }).then(() => fs.appendFile(path.join(data, 'helfer.log'), `${new Date().toISOString()} ${error?.stack || error}\n`)).catch(() => {});
   app.whenReady().then(async () => {
     if (app.isPackaged) process.env.CHETTI_BIN_DIR ||= path.join(process.resourcesPath, 'bin');
+    // Windows trägt das Schema hier für den Nutzer ein; macOS liest es aus dem Paket (`protocols` in scripts/helper/build.mjs).
+    if (!TEST && app.isPackaged) app.setAsDefaultProtocolClient('chetti-helfer');
     await (await import(here('wissen.mjs'))).ensureKnowledge(data, { version: app.getVersion(), url: process.env.CHETTI_KNOWLEDGE_URL || require('../package.json').wissen });
     const { createHelper, DEFAULT_ORIGINS } = await import(here('server.mjs'));
     const { ensureCertificate } = await import(here('tls.mjs'));

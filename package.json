@@ -1,6 +1,6 @@
 {
   "name": "chetti-helfer",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "Lokaler Dienst für Chetti: Spracherkennung und Notizen auf dem eigenen Rechner.",
   "license": "MIT",
   "private": true,

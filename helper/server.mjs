@@ -6,7 +6,7 @@
  *   GET  /helper/info    Version, Hardware, Modellpaket, Stand der Dienste (ohne Gesprächsdaten)
  *   POST /helper/warmup  Dienste bereitmachen (die Webapp ruft es beim Start einer Konsultation)
  *   POST /helper/stop    Dienste beenden und Speicher freigeben
- *   POST /api            dieselben Aktionen wie der lokale Server (server/service.mjs), ohne `auth.*` und `dev.*`
+ *   POST /api            dieselben Aktionen wie der lokale Server (server/service.mjs), ohne `auth.*`; `dev.*` (Modelltests unter /dev) nur mit lokalen Modellen
  *
  * Schutz: Der Host muss 127.0.0.1 oder localhost mit unserem Port sein (gegen DNS-Rebinding), und jede Anfrage trägt einen
  * erlaubten Origin. Eine fremde Webseite kommt damit weder durch die Browserprüfung (CORS) noch durch die Prüfung hier.
@@ -24,7 +24,7 @@ import { Runtime, ollamaService, whisperService } from './runtime.mjs';
 export const DEFAULT_PORT = 47813;
 export const DEFAULT_ORIGINS = ['https://chettiai.de', 'https://www.chettiai.de'];
 const MAX_BYTES = 3_100_000;
-const BLOCKED = /^(auth|dev)\./;
+const BLOCKED = /^auth\./;
 
 export async function createHelper({ directory, port = DEFAULT_PORT, tls, origins = DEFAULT_ORIGINS, version = '0.1.0', hardware = assess(), runtime, provider, fetcher = fetch, home = os.homedir(), idleMs } = {}) {
   const env = { ...process.env, CHETTI_WEG: 'lokal', ...(hardware.tier && !process.env.CHETTI_LOCAL_LLM_MODEL ? { CHETTI_LOCAL_LLM_MODEL: hardware.tier } : {}) };
@@ -82,7 +82,15 @@ export async function createHelper({ directory, port = DEFAULT_PORT, tls, origin
       if (typeof account !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(account)) throw new Error('Ungültige Anfrage.');
       // Beginnt eine Konsultation, laufen die Dienste schon an, während die Ärztin spricht.
       if (action === 'session.start') void runtime.warmup().catch(() => {});
-      json(200, { result: await (await serviceFor(account)).dispatch(action, payload, { locale }) });
+      const service = await serviceFor(account);
+      if (action.startsWith('dev.')) {
+        // Modelltests (/dev): nur lokale Modelle, über dieselbe Laufzeit wie die Konsultation. Die Liste der Modelle braucht ein laufendes Ollama.
+        // Baut jemand den Helfer ohne server/dev.mjs, gibt es die Tests nicht.
+        const { devBench } = await import('../server/dev.mjs').catch(() => { throw new Error('Diese Aktion wird nicht unterstützt.'); });
+        if (action === 'dev.setup') await runtime.ensure('llm').catch(() => {});
+        return json(200, { result: await devBench(service, action, payload, locale, { fetcher: guarded, local: config, cloud: false }) });
+      }
+      json(200, { result: await service.dispatch(action, payload, { locale }) });
     } catch (error) {
       json(400, { error: translate(error instanceof SyntaxError ? 'Ungültige Anfrage.' : error.code ? 'Dateizugriff fehlgeschlagen. Bitte Schreibrechte prüfen.' : error.message || 'Die Aktion ist fehlgeschlagen.', locale) });
     }
